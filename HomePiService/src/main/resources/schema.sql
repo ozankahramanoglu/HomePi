@@ -1,12 +1,12 @@
 DROP TABLE IF EXISTS public.bot_user CASCADE ;
 DROP TABLE IF EXISTS public.status ;
 
-CREATE TABLE public.status(
+CREATE TABLE IF NOT EXISTS public.status(
     id INT primary key ,
     status varchar(140)
                           );
 
-CREATE TABLE public.bot_user(
+CREATE TABLE IF NOT EXISTS public.bot_user(
     id INT primary key ,
     firstName varchar(140) NOT NULL,
     lastName varchar(140),
