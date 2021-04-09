@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS public.bot_user(
     userName varchar(140),
     isbot bool,
     languageCode varchar(10),
+    locationShare int DEFAULT 1,
+    ContractShare int DEFAULT 1,
     status INT,
     FOREIGN KEY (status)
         REFERENCES public.status(id)

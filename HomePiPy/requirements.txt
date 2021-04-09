@@ -1,0 +1,5 @@
+telethon
+asyncio
+requests
+python-telegram-bot
+tgcrypto

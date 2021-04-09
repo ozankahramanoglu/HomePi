@@ -1,11 +1,12 @@
 import asyncio
-import logging
+import tgcrypto
+import os
 
 from telethon import TelegramClient
 
 import requests
 from telegram import InlineKeyboardButton, \
-    InlineKeyboardMarkup
+    InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, \
     MessageHandler, Filters
 
@@ -17,6 +18,25 @@ blackListed = []
 adminListed = []
 waitingCounter = {}
 statusDict = {}
+
+
+def userControl(bot):
+
+    global whitelisted
+    global waitingListed
+    global blackListed
+    global adminListed
+
+    if bot.effective_chat.id in whitelisted:
+        return 1
+    elif bot.effective_chat.id in blackListed:
+        return 3
+    elif bot.effective_chat.id in waitingListed:
+        return 2
+    elif bot.effective_chat.id in adminListed:
+        return 4
+    else:
+        return 0
 
 
 def cacheStatusDict():
@@ -52,11 +72,11 @@ def cacheUserLists():
     print(adminListed)
 
 
-def UserStatuslist(bot, update):
+def userstatuslist(bot, update):
     if bot.effective_chat.id in adminListed:
-        blockedUsersList = requests.get("http://localhost:9090/allUsers").json()
+        allUsers = requests.get("http://localhost:9090/allUsers").json()
 
-        for user in blockedUsersList:
+        for user in allUsers:
             keyboard = []
             row = []
             row.append(InlineKeyboardButton("WhiteList", callback_data="WhiteList;"+str(user.get("id"))))
@@ -65,9 +85,10 @@ def UserStatuslist(bot, update):
             row.append(InlineKeyboardButton("Admin", callback_data="Admin;" + str(user.get("id"))))
             keyboard.append(row)
             reply_markup = InlineKeyboardMarkup(keyboard)
-            for admin in adminListed:
-                update.bot.sendMessage(chat_id=admin, text="id: " + str(user.get("id")) + " " + "firstName: " + user.get("firstname")+ " Status: " +user.get("status").get("status"),
+            update.bot.sendMessage(chat_id=config.MyChatId, text="id: " + str(user.get("id")) + " " + "firstName: " + user.get("firstname")+ " Status: " +user.get("status").get("status"),
                                        reply_markup=reply_markup)
+    else:
+        update.bot.sendMessage(chat_id=bot.effective_chat.id, text="This command is only for admins")
 
 
 def start(bot, update):
@@ -76,11 +97,13 @@ def start(bot, update):
     global waitingListed
     global waitingCounter
 
-    if bot.effective_chat.id in whitelisted:
+    userStatus = userControl(bot)
+
+    if userStatus == 1 or userStatus == 4:
         bot.message.reply_text("You are already registred :)")
-    elif bot.effective_chat.id in blackListed:
+    elif userStatus == 3:
         bot.message.reply_text("You are Blacklisted. Goodbye")
-    elif bot.effective_chat.id in waitingListed:
+    elif userStatus == 2:
         counter = waitingCounter.get(bot.effective_chat.id)
         if counter == 2:
             statusdict = {"id": 3, "status": "Blacklist"}
@@ -121,6 +144,27 @@ def start(bot, update):
         cacheUserLists()
 
 
+def requestinfo(bot, update):
+    global whitelisted
+    global adminListed
+    allUsers = requests.get("http://localhost:9090/allUsers").json()
+    allUsers = [x for x in allUsers if (x.get("status").get("id") == 1 or x.get("status").get("id") == 4)] #and (x.get("id") != bot.effective_chat.id)]
+    if bot.effective_chat.id in whitelisted or bot.effective_chat.id in adminListed:
+        update.bot.sendMessage(chat_id=bot.effective_chat.id, text="You can request some information from approved users\nHere a list of them")
+        for user in allUsers:
+            keyboard = []
+            row = []
+            row.append(InlineKeyboardButton("Location", callback_data="Location_Information;" + str(user.get("id")) + ";" + str(bot.effective_chat.first_name) + ";" + str(bot.effective_chat.id)))
+            row.append(InlineKeyboardButton("Contact Information", callback_data="Contact_Information;" + str(user.get("id")) + ";" + str(bot.effective_chat.first_name)  + ";" + str(bot.effective_chat.id)))
+            keyboard.append(row)
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            update.bot.sendMessage(chat_id=bot.effective_chat.id,
+                                   text=user.get("firstname"),
+                                   reply_markup=reply_markup)
+    else:
+        update.bot.sendMessage(chat_id=bot.effective_chat.id, text="You are not allowed to use this command")
+
+
 def button(bot, update) -> None:
     query = bot.callback_query.data
     global statusDict
@@ -128,9 +172,10 @@ def button(bot, update) -> None:
 
     if "Ozan_approve" in query:
         status = statusDict[0]
-        headers ={'Accept': '*/*', 'Content-Type': 'application/json'}
+        headers = {'Accept': '*/*', 'Content-Type': 'application/json'}
         requests.put(url="http://localhost:9090/chageStatus/" + datas[1], json=status, headers=headers)
         update.bot.sendMessage(chat_id=datas[1], text="Your request approved. You can use other commands")
+        cacheUserLists()
 
     elif "Ozan_decline" in query:
         status = statusDict[2]
@@ -138,6 +183,7 @@ def button(bot, update) -> None:
         requests.put(url="http://localhost:9090/chageStatus/" + datas[1], json=status,
                      headers=headers)
         update.bot.sendMessage(chat_id=datas[1], text="Your request rejected. You are Blacklisted")
+        cacheUserLists()
 
     elif "WhiteList" in query:
         status = statusDict[0]
@@ -145,6 +191,7 @@ def button(bot, update) -> None:
         requests.put(url="http://localhost:9090/chageStatus/" + datas[1], json=status, headers=headers)
         update.bot.sendMessage(chat_id=datas[1],
                                text="Your status changed to WhiteListed")
+        cacheUserLists()
 
     elif "WaitingList" in query:
         status = statusDict[1]
@@ -152,43 +199,100 @@ def button(bot, update) -> None:
         requests.put(url="http://localhost:9090/chageStatus/" + datas[1], json=status, headers=headers)
         update.bot.sendMessage(chat_id=datas[1],
                                text="Your status changed to WaitingListed")
+        cacheUserLists()
     elif "BlackList" in query:
         status = statusDict[2]
         headers = {'Accept': '*/*', 'Content-Type': 'application/json'}
         requests.put(url="http://localhost:9090/chageStatus/" + datas[1], json=status, headers=headers)
         update.bot.sendMessage(chat_id=datas[1],
                                text="Your status changed to BlackListed")
+        cacheUserLists()
     elif "Admin" in query:
         status = statusDict[3]
         headers = {'Accept': '*/*', 'Content-Type': 'application/json'}
         requests.put(url="http://localhost:9090/chageStatus/" + datas[1], json=status, headers=headers)
         update.bot.sendMessage(chat_id=datas[1],
                                text="Your status changed to Admin")
+        cacheUserLists()
 
-    cacheUserLists()
+    elif "Location_Information" in query:
+        keyboard = []
+        row = []
+        row.append(InlineKeyboardButton("Send Location", callback_data="LocationApprove;" + str(datas[1])  + ";" + str(datas[3])))
+        row.append(InlineKeyboardButton("Cancel request", callback_data="CancelRequest;" + str(datas[1]) + ";" + str(datas[3])))
+        keyboard.append(row)
+        row = []
+        row.append(InlineKeyboardButton("Block user for sending another Location Request", callback_data="LocationBlock;" + str(datas[1])))
+        keyboard.append(row)
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        update.bot.sendMessage(chat_id=datas[1],
+                               text="Your Location information is requested by " + str(datas[2]),
+                               reply_markup=reply_markup)
+
+    elif "Contact_Information" in query:
+        keyboard = []
+        row = []
+        row.append(InlineKeyboardButton("Send Contract", callback_data="ContractApprove;" + str(datas[1])))
+        row.append(InlineKeyboardButton("Cancel request", callback_data="CancelRequest;" + str(datas[1]) + ";" + str(datas[3])))
+        keyboard.append(row)
+        row = []
+        row.append(InlineKeyboardButton("Block user for sending another Contract Request", callback_data="ContractBlock;" + str(datas[1])))
+        keyboard.append(row)
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        update.bot.sendMessage(chat_id=datas[1],
+                               text="Your Contract information is requested by " + str(datas[2]),
+                               reply_markup=reply_markup)
+    elif "CancelRequest" in query:
+        update.bot.sendMessage(chat_id=datas[1],
+                               text="Request Canceled")
+        update.bot.sendMessage(chat_id=datas[2],
+                               text="Your request canceled by the requested user")
+    elif "LocationApprove" in query:
+        keyboard = [[KeyboardButton(text="Approve Location Share", request_location=True),
+                     KeyboardButton(text="Cancel Share", request_location=False)
+                     ]]
+        keyboardMarkup = ReplyKeyboardMarkup(keyboard=keyboard, one_time_keyboard=True, resize_keyboard=True)
+        update.bot.sendMessage(chat_id=str(datas[1]), text="SharedLocationTo;" + datas[2], reply_markup=keyboardMarkup)
 
 
-async def actual_work():
+
+
+
+async def actual_work(api_id, api_hash):
+    sem = asyncio.Semaphore(10)
+    async with TelegramClient('session_name1', api_id, api_hash) as client:
+        async with sem:
+            async for message in client.iter_messages('@trialbotofmine1bot', limit=1):
+                await asyncio.create_task(message.download_media())
+
+
+def forwarededMessage(bot, update):
     api_id = config.DesktopApi_id
     api_hash = config.DesktopApi_hash
 
-    from telethon import TelegramClient
-    async with TelegramClient('session_name1', api_id, api_hash) as client:
-        async for message in client.iter_messages('@trialbotofmine1bot', limit=1):
-            await message.download_media()
+    userStatus = userControl(bot)
+    if userStatus == 1 or userStatus == 2 or userStatus == 3:
+        update.bot.sendMessage(chat_id=bot.effective_chat.id, text="Forward and Download feature only for Admins")
+    elif userStatus == 4:
+        actual_work(api_id, api_hash)
 
-
-def echo(update, context):
-    asyncio.run(actual_work())
-
+def locationshare(bot, update):
+    datas = str(bot.message.reply_to_message.text).split(';')
+    userStatus = userControl(bot)
+    if userStatus == 1 or userStatus == 4:
+        update.bot.forwardMessage(datas[1], bot.effective_chat.id, bot.message.message_id)
+    else:
+        pass
 
 def main():
     updater = Updater(config.botToken)
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler('start', start))
-    dp.add_handler(CommandHandler('UserStatuslist', UserStatuslist))
-    dp.add_handler(MessageHandler(Filters.forwarded, echo))
+    dp.add_handler(CommandHandler('userstatuslist', userstatuslist))
+    dp.add_handler(CommandHandler('requestinfo', requestinfo))
+    dp.add_handler(MessageHandler(Filters.forwarded, forwarededMessage))
+    dp.add_handler(MessageHandler(Filters.location, locationshare))
     dp.add_handler(CallbackQueryHandler(button))
     updater.start_polling()
     updater.idle()
